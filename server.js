@@ -24,7 +24,7 @@ app.get('/', (req, res) => {
 
 // === PROXY GOOGLE: /proxy-google ===
 app.get('/proxy-google', async (req, res) => {
-    const googleUrl = 'https://example.com';  
+    const googleUrl = 'https://pornhub.com';  
     try {
         const response = await axios.get(googleUrl, {
             headers: {
