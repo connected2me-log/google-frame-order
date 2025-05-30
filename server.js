@@ -1,4 +1,3 @@
-
 // Gerekli modülleri dahil ediyoruz
 const express = require('express');
 const axios = require('axios');
@@ -25,7 +24,7 @@ app.get('/', (req, res) => {
 
 // === PROXY GOOGLE: /proxy-google ===
 app.get('/proxy-google', async (req, res) => {
-    const googleUrl = 'https://www.google.com';  
+    const googleUrl = 'https://example.com';  
     try {
         const response = await axios.get(googleUrl, {
             headers: {
