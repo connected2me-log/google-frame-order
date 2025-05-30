@@ -17,9 +17,11 @@ async function createDirs() {
     try {
         await fs.mkdir(UPLOADS_DIR, { recursive: true });
         await fs.mkdir(VECTORIZED_DIR, { recursive: true });
-        console.log('Geçici dizinler oluşturuldu.');
+        console.log('Geçici dizinler oluşturuldu: uploads/ ve vectorized/');
     } catch (error) {
         console.error('Dizin oluşturma hatası:', error);
+        // Uygulama dizinler olmadan çalışamayacağı için buradan çıkmak mantıklı olabilir.
+        // process.exit(1); 
     }
 }
 createDirs();
@@ -47,10 +49,12 @@ const upload = multer({
         if (allowedTypes.includes(file.mimetype)) {
             cb(null, true);
         } else {
-            cb(new Error('Sadece JPEG, PNG, WEBP, BMP ve GIF resim dosyaları yüklenebilir.'), false);
+            // Hata mesajını req nesnesine ekliyoruz ki sonra yakalayabilelim
+            req.fileValidationError = new Error('Sadece JPEG, PNG, WEBP, BMP ve GIF resim dosyaları yüklenebilir.');
+            cb(null, false); // İşlemi durdur
         }
     }
-});
+}).single('image'); // .single('image') burada tanımlandı
 
 // Express uygulaması için statik dosya sunumu yapılandırması
 // 'public' klasöründeki dosyalar doğrudan erişilebilir olacak (HTML, CSS, JS)
@@ -60,59 +64,85 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/vectorized', express.static(VECTORIZED_DIR));
 
 // Resim yükleme ve vektörleştirme için POST endpoint'i
-app.post('/upload', upload.single('image'), async (req, res) => {
-    // Yüklenen dosya yoksa hata döndür
-    if (!req.file) {
-        return res.status(400).json({ success: false, message: 'Lütfen bir resim dosyası seçin.' });
-    }
-
-    const uploadedFilePath = req.file.path; // Yüklenen dosyanın tam yolu
-    const outputFileName = `${path.parse(req.file.filename).name}.svg`; // Çıktı SVG dosyasının adı
-    const vectorizedFilePath = path.join(VECTORIZED_DIR, outputFileName); // Vektörleştirilmiş dosyanın kaydedileceği yol
-
-    try {
-        // Yüklenen resim dosyasını oku
-        const imageBuffer = await fs.readFile(uploadedFilePath);
-
-        // Resim buffer'ını vektörleştir
-        const svgString = await vectorize(imageBuffer, { 
-            colorMode: ColorMode.Color, // Renkli vektörleştirme
-            colorPrecision: 8,          // Renk hassasiyeti
-            filterSpeckle: 4,           // Benekleri filtreleme
-            spliceThreshold: 45,        // Birleştirme eşiği
-            cornerThreshold: 60,        // Köşe eşiği
-            hierarchical: Hierarchical.Stacked, // Katmanlama stratejisi
-            mode: PathSimplifyMode.Spline, // Yol basitleştirme modu
-            layerDifference: 6,         // Katman farkı
-            lengthThreshold: 4,         // Uzunluk eşiği
-            maxIterations: 2            // Maksimum iterasyon sayısı
-        });
-
-        // Vektörleştirilmiş SVG'yi dosyaya yaz
-        await fs.writeFile(vectorizedFilePath, svgString);
-
-        // Başarılı yanıt gönder ve vektörleştirilmiş dosyanın URL'sini sağla
-        res.json({ 
-            success: true, 
-            message: 'Resim başarıyla vektörleştirildi!', 
-            svgUrl: `/vectorized/${outputFileName}` // Frontend'in erişebileceği URL
-        });
-
-    } catch (error) {
-        console.error('Vektörleştirme veya dosya işlemi hatası:', error);
-        res.status(500).json({ success: false, message: 'Resim vektörleştirilirken bir hata oluştu.', error: error.message });
-    } finally {
-        // Geçici yüklenen dosyayı temizle
-        try {
-            await fs.unlink(uploadedFilePath);
-            console.log(`Geçici dosya silindi: ${uploadedFilePath}`);
-        } catch (unlinkError) {
-            console.error(`Geçici dosya silinirken hata oluştu: ${uploadedFilePath}`, unlinkError);
+app.post('/upload', (req, res) => {
+    upload(req, res, async (err) => {
+        // Multer'dan gelen genel hata yakalama
+        if (err instanceof multer.MulterError) {
+            console.error('Multer hatası:', err.message);
+            return res.status(400).json({ success: false, message: `Dosya yükleme hatası: ${err.message}` });
+        } else if (req.fileValidationError) {
+            // fileFilter'dan gelen özel hatayı yakalama
+            console.error('Dosya doğrulama hatası:', req.fileValidationError.message);
+            return res.status(400).json({ success: false, message: req.fileValidationError.message });
+        } else if (err) {
+            // Diğer bilinmeyen hatalar
+            console.error('Bilinmeyen bir dosya yükleme hatası oluştu:', err);
+            return res.status(500).json({ success: false, message: 'Dosya yüklenirken beklenmeyen bir hata oluştu.' });
         }
-    }
+
+        // Yüklenen dosya yoksa hata döndür
+        if (!req.file) {
+            console.error('Dosya yüklenemedi: req.file bulunamadı. Kullanıcı dosya seçmedi mi?');
+            return res.status(400).json({ success: false, message: 'Lütfen bir resim dosyası seçin.' });
+        }
+
+        console.log(`[${new Date().toISOString()}] Dosya başarıyla yüklendi: ${req.file.originalname}`);
+        console.log(`[${new Date().toISOString()}] Yüklenen dosya yolu: ${req.file.path}`);
+
+        const uploadedFilePath = req.file.path; // Yüklenen dosyanın tam yolu
+        const outputFileName = `${path.parse(req.file.filename).name}.svg`; // Çıktı SVG dosyasının adı
+        const vectorizedFilePath = path.join(VECTORIZED_DIR, outputFileName); // Vektörleştirilmiş dosyanın kaydedileceği yol
+
+        try {
+            console.log(`[${new Date().toISOString()}] Resim dosyası okunuyor: ${uploadedFilePath}`);
+            const imageBuffer = await fs.readFile(uploadedFilePath);
+            console.log(`[${new Date().toISOString()}] Resim buffer boyutu: ${imageBuffer.length} byte.`);
+
+            console.log(`[${new Date().toISOString()}] Resim vektörleştiriliyor...`);
+            const svgString = await vectorize(imageBuffer, { 
+                colorMode: ColorMode.Color, // Renkli vektörleştirme
+                colorPrecision: 8,          // Renk hassasiyeti
+                filterSpeckle: 4,           // Benekleri filtreleme
+                spliceThreshold: 45,        // Birleştirme eşiği
+                cornerThreshold: 60,        // Köşe eşiği
+                hierarchical: Hierarchical.Stacked, // Katmanlama stratejisi
+                mode: PathSimplifyMode.Spline, // Yol basitleştirme modu
+                layerDifference: 6,         // Katman farkı
+                lengthThreshold: 4,         // Uzunluk eşiği
+                maxIterations: 2            // Maksimum iterasyon sayısı
+            });
+            console.log(`[${new Date().toISOString()}] Vektörleştirme tamamlandı.`);
+
+            console.log(`[${new Date().toISOString()}] Vektörleştirilmiş SVG dosyası yazılıyor: ${vectorizedFilePath}`);
+            await fs.writeFile(vectorizedFilePath, svgString);
+            console.log(`[${new Date().toISOString()}] SVG dosyası başarıyla yazıldı.`);
+
+            // Başarılı yanıt gönder ve vektörleştirilmiş dosyanın URL'sini sağla
+            res.json({ 
+                success: true, 
+                message: 'Resim başarıyla vektörleştirildi!', 
+                svgUrl: `/vectorized/${outputFileName}` // Frontend'in erişebileceği URL
+            });
+
+        } catch (error) {
+            // Genel yakalayıcı: Herhangi bir hata oluşursa yakalar
+            console.error(`[${new Date().toISOString()}] Vektörleştirme veya dosya işlemi sırasında beklenmeyen bir hata oluştu:`, error);
+            res.status(500).json({ success: false, message: `Resim vektörleştirilirken bir hata oluştu: ${error.message}`, error: error.message });
+        } finally {
+            // Geçici yüklenen dosyayı temizle
+            try {
+                if (uploadedFilePath) { // dosya yüklenmişse sil
+                    await fs.unlink(uploadedFilePath);
+                    console.log(`[${new Date().toISOString()}] Geçici dosya silindi: ${uploadedFilePath}`);
+                }
+            } catch (unlinkError) {
+                console.error(`[${new Date().toISOString()}] Geçici dosya silinirken hata oluştu: ${uploadedFilePath}`, unlinkError);
+            }
+        }
+    });
 });
 
 // Sunucuyu başlat
 app.listen(PORT, () => {
-    console.log(`Sunucu http://localhost:${PORT} adresinde çalışıyor`);
+    console.log(`[${new Date().toISOString()}] Sunucu http://localhost:${PORT} adresinde çalışıyor`);
 });
