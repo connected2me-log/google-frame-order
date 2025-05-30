@@ -1,17 +1,23 @@
 {
-  "name": "render-proxy-server",
+  "name": "vectorizer-app",
   "version": "1.0.0",
-  "description": "Node.js Proxy Sunucusu (Render için)",
+  "description": "Raster to Vector Converter with Node.js and Express",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
+  "keywords": [
+    "vectorizer",
+    "image",
+    "svg",
+    "nodejs",
+    "express"
+  ],
+  "author": "Gemini",
+  "license": "MIT",
   "dependencies": {
-    "axios": "^1.6.2",
-    "cors": "^2.8.5",
-    "express": "^4.18.2"
-  },
-  "engines": {
-    "node": "18.x"
+    "@neplex/vectorizer": "^1.1.0",
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1"
   }
 }
